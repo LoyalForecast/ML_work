@@ -1,34 +1,36 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import classification_report, roc_auc_score, roc_curve, auc, precision_recall_curve
+from sklearn.metrics import classification_report, roc_auc_score, precision_recall_curve, auc
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from xgboost import XGBClassifier
 import matplotlib.pyplot as plt
-import logging
+from sklearn.impute import SimpleImputer
 
-logging.basicConfig(filename='model_logs.log', filemode='w', format='%(asctime)s - %(message)s', level=logging.INFO)
-
-def load_and_prepare_data(file_path, date_cols=None, dtype_dict=None, delimiter=','):
+def load_and_prepare_data(file_path, date_cols, dtype_dict, delimiter):
     data = pd.read_csv(file_path, delimiter=delimiter, parse_dates=date_cols, dtype=dtype_dict)
-    logging.info(f"Loaded data from {file_path} with shape {data.shape}")
     return data
 
-base_path = '/Users/daniil/Desktop/LoyalForecast (ЦП)/LoyalForecast/'
+base_path = '/Users/daniil/Desktop/LoyalForecast (ЦП)/ML_work/ML_work/'
 train_path = base_path + 'train.csv'
 transactions_path = base_path + 'trnsctns.csv'
 contributors_path = base_path + 'cntrbtrs.csv'
+test_path = base_path + 'test.csv'
 
 clnts_fin_prtrt = load_and_prepare_data(train_path, ['frst_pmnt_date', 'lst_pmnt_date_per_qrtr'], {'pmnts_type': 'category', 'gender': 'category'}, ',')
 trnsctns = load_and_prepare_data(transactions_path, ['npo_oprtn_date'], {'npo_oprtn_grp': 'category'}, ';')
 cntrbtrs = load_and_prepare_data(contributors_path, None, {'accnt_pnsn_schm': 'category'}, ';')
 
 cntrbtrs.rename(columns={'npo_accnt_id': 'npo_account_id'}, inplace=True)
+
 trnsctns['year_quarter'] = trnsctns['npo_oprtn_date'].dt.to_period('Q')
-trns_aggregated = trnsctns.groupby('npo_account_id').agg({'npo_sum': ['sum', 'mean', 'count'], 'npo_oprtn_grp': lambda x: x.mode()[0] if not x.empty else np.nan}).reset_index()
+trns_aggregated = trnsctns.groupby('npo_account_id').agg({
+    'npo_sum': ['sum', 'mean', 'count'],
+    'npo_oprtn_grp': lambda x: x.mode()[0] if not x.empty else np.nan
+}).reset_index()
 trns_aggregated.columns = ['npo_account_id', 'total_sum', 'mean_sum', 'count_trns', 'common_oprtn_grp']
 
 full_data = pd.merge(pd.merge(clnts_fin_prtrt, trns_aggregated, on='npo_account_id', how='left'), cntrbtrs, on='npo_account_id', how='left')
@@ -42,15 +44,19 @@ features = ['age', 'clnt_cprtn_time_d', 'actv_prd_d', 'lst_pmnt_rcnc_d', 'balanc
 categorical_features = ['pmnts_type', 'gender', 'common_oprtn_grp', 'accnt_pnsn_schm', 'quarter', 'assignee_npo', 
                         'assignee_ops', 'phone_number', 'email', 'lk', 'citizen', 'fact_addrss', 'appl_mrkr', 'evry_qrtr_pmnt']
 
+num_preprocessor = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler())
+])
+cat_preprocessor = Pipeline(steps=[
+    ('imputer', SimpleImputer(strategy='most_frequent')),
+    ('encoder', OneHotEncoder(handle_unknown='ignore'))
+])
 preprocessor = ColumnTransformer(
     transformers=[
-        ('num', StandardScaler(), features),
-        ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
+        ('num', num_preprocessor, features),
+        ('cat', cat_preprocessor, categorical_features)
     ])
-
-X = full_data.drop(['churn', 'npo_account_id', 'client_id', 'frst_pmnt_date', 'lst_pmnt_date_per_qrtr', 'year'], axis=1)
-y = full_data['churn'].astype(int)
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
 
 ensemble_clf = VotingClassifier(estimators=[
     ('rf', RandomForestClassifier(n_estimators=100, random_state=42)),
@@ -63,11 +69,15 @@ model = Pipeline([
     ('classifier', ensemble_clf)
 ])
 
+X = full_data.drop(['churn', 'npo_account_id', 'client_id', 'frst_pmnt_date', 'lst_pmnt_date_per_qrtr', 'year'], axis=1)
+y = full_data['churn'].astype(int)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+
 model.fit(X_train, y_train)
 y_pred = model.predict(X_test)
 y_pred_proba = model.predict_proba(X_test)[:, 1]
 
-print("Ensemble Classifier Report:")
+print("Voting Classifier Report:")
 print(classification_report(y_test, y_pred))
 roc_auc = roc_auc_score(y_test, y_pred_proba)
 print("ROC AUC Score:", roc_auc)
@@ -75,7 +85,6 @@ print("ROC AUC Score:", roc_auc)
 precision, recall, _ = precision_recall_curve(y_test, y_pred_proba)
 pr_auc = auc(recall, precision)
 print("Precision-Recall AUC:", pr_auc)
-
 plt.figure(figsize=(10, 5))
 plt.plot(recall, precision, label='PR Curve (area = %0.2f)' % pr_auc)
 plt.xlabel('Recall')
@@ -85,7 +94,15 @@ plt.legend(loc="upper right")
 plt.savefig('pr_curve.png')
 plt.show()
 
-predictions = pd.DataFrame({'Actual': y_test, 'Predicted': y_pred, 'Predicted_Proba': y_pred_proba})
-predictions.to_csv('model_predictions.csv', index=False)
+test_data = pd.read_csv(test_path)
+test_data['days_since_first_payment'] = (pd.Timestamp('today') - pd.to_datetime(test_data['frst_pmnt_date'])).dt.days
+test_data['days_since_last_payment'] = (pd.Timestamp('today') - pd.to_datetime(test_data['lst_pmnt_date_per_qrtr'])).dt.days
+test_data_prepared = preprocessor.transform(test_data.drop(['npo_account_id', 'quarter'], axis=1))
+test_predictions = model.predict_proba(test_data_prepared)[:, 1]
 
-logging.info(f"Model trained with ROC AUC: {roc_auc} and PR AUC: {pr_auc}")
+submission = pd.DataFrame({
+    'npo_account_id': test_data['npo_account_id'],
+    'quarter': test_data['quarter'],
+    'churn': test_predictions
+})
+submission.to_csv('submission.csv', index=False)

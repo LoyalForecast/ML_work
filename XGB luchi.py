@@ -17,7 +17,7 @@ def load_and_prepare_data(file_path, date_cols=None, dtype_dict=None, delimiter=
     logging.info(f"Loaded data from {file_path} with shape {data.shape}")
     return data
 
-base_path = '/Users/daniil/Desktop/LoyalForecast (ЦП)/LoyalForecast/'
+base_path = '/Users/daniil/Desktop/LoyalForecast (ЦП)/ML_work/ML_work/'
 train_path = base_path + 'train.csv'
 transactions_path = base_path + 'trnsctns.csv'
 contributors_path = base_path + 'cntrbtrs.csv'
