@@ -1,0 +1,3 @@
+2024-04-14 07:22:14,935 - Loaded data from /Users/daniil/Desktop/LoyalForecast (ЦП)/LoyalForecast/train.csv with shape (3589918, 42)
+2024-04-14 07:23:02,746 - Loaded data from /Users/daniil/Desktop/LoyalForecast (ЦП)/LoyalForecast/trnsctns.csv with shape (26337901, 7)
+2024-04-14 07:23:03,035 - Loaded data from /Users/daniil/Desktop/LoyalForecast (ЦП)/LoyalForecast/cntrbtrs.csv with shape (911470, 3)
